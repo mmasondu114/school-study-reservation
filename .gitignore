@@ -1,0 +1,24 @@
+node_modules/
+.DS_Store
+project.private.config.json
+.env
+.env.*
+!.env.example
+coverage/
+artifacts/
+
+.local-study/
+
+# Local data, backups, generated output and retired project history
+archives/
+outputs/
+preview/
+*.tar.gz
+*.zip
+*.log
+*.pem
+*.key
+**/.openai/
+**/.sites-runtime/
+**/.dev.vars*
+**/initial-accounts.json

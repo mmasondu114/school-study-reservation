@@ -1,0 +1,16 @@
+{
+  "name": "school-study-reservation",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node scripts/check.js",
+    "preview": "node local/server.js",
+    "build:local": "npm --prefix website run build",
+    "local": "node local/server.js",
+    "start": "node local/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

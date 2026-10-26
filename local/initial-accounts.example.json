@@ -1,0 +1,7 @@
+{
+  "shortcutUsername": "local-admin",
+  "accounts": [
+    {"id": "local-admin", "name": "管理员", "role": "admin", "password": "", "mustChangePassword": true},
+    {"id": "test-student", "name": "测试学生", "role": "student", "password": "", "mustChangePassword": false}
+  ]
+}
