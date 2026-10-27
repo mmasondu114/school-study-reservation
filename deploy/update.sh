@@ -26,6 +26,17 @@ if [[ ! -f "$deps/.ready" ]]; then
   touch "$deps/.ready"
 fi
 ln -s "$deps/node_modules" "$release/website/node_modules"
+# The retained cloud adapter has dependency-level regression tests as well.
+backend_lock="$(cat "$release/cloudfunctions/study/package-lock.json" "$release/cloudfunctions/study/vendor/lodash-set/index.js" "$release/cloudfunctions/study/vendor/lodash-set/package.json" | sha256sum | cut -d ' ' -f 1)"
+backend_deps="$root/dependencies/backend-$major-$backend_lock"
+if [[ ! -f "$backend_deps/.ready" ]]; then
+  mkdir -p "$backend_deps"
+  cp "$release/cloudfunctions/study/package.json" "$release/cloudfunctions/study/package-lock.json" "$release/cloudfunctions/study/.npmrc" "$backend_deps/"
+  cp -a "$release/cloudfunctions/study/vendor" "$backend_deps/"
+  npm ci --prefix "$backend_deps" --ignore-scripts --no-audit --no-fund
+  touch "$backend_deps/.ready"
+fi
+ln -s "$backend_deps/node_modules" "$release/cloudfunctions/study/node_modules"
 cd "$release"
 npm test
 npm run check
