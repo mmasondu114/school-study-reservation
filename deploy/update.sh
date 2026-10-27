@@ -79,11 +79,18 @@ ln -s "$release" "$root/current.next"
 mv -Tf "$root/current.next" "$root/current"
 STUDY_DEPLOY_ROOT="$root" pm2 startOrRestart "$release/deploy/ecosystem.config.cjs" --update-env
 node - "$root/shared/runtime.json" <<'JS'
-const fs=require('node:fs');
+const fs=require('node:fs'),http=require('node:http');
+const probe=c=>new Promise((resolve,reject)=>{
+ const req=http.get({host:'127.0.0.1',port:c.STUDY_PORT,path:'/api/study',headers:{Host:new URL(c.STUDY_ORIGIN).host}},res=>{
+  let body='';res.setEncoding('utf8');res.on('data',chunk=>body+=chunk);res.on('error',reject);
+  res.on('end',()=>{try{resolve(res.statusCode===200&&JSON.parse(body).ready===true);}catch(e){reject(e);}});
+ });
+ req.setTimeout(1500,()=>req.destroy(new Error('健康检查超时')));req.on('error',reject);
+});
 (async()=>{
  const c=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
  for(let i=0;i<20;i++){
-  try{const r=await fetch('http://127.0.0.1:'+c.STUDY_PORT+'/api/study',{headers:{Host:new URL(c.STUDY_ORIGIN).host},signal:AbortSignal.timeout(1500)});const data=await r.json();if(r.ok&&data.ready){console.log('健康检查通过。');return;}}catch{}
+  try{if(await probe(c)){console.log('健康检查通过。');return;}}catch{}
   await new Promise(r=>setTimeout(r,500));
  }
  throw new Error('新版本未通过健康检查');
