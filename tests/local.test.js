@@ -3,15 +3,15 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {Readable}=require('node:stream');
 const {createLocalApp}=require('../local/app');
 const ORIGIN='http://127.0.0.1:5173';
-function client(app,jar={}){
+function client(app,jar={},origin=ORIGIN){
  return{jar,async call(action,input={},extra={}){
-  const req=Readable.from([Buffer.from(JSON.stringify({action,input}))]);Object.assign(req,{method:'POST',url:'/api/study',headers:{host:'127.0.0.1:5173',origin:ORIGIN,cookie:Object.entries(jar).map(([k,v])=>k+'='+v).join('; '),...extra}});
+  const req=Readable.from([Buffer.from(JSON.stringify({action,input}))]);Object.assign(req,{method:'POST',url:'/api/study',headers:{host:new URL(origin).host,origin,cookie:Object.entries(jar).map(([k,v])=>k+'='+v).join('; '),...extra}});
   let status,headers,body;await app.handle(req,{writeHead(s,h){status=s;headers=h;},end(b){body=JSON.parse(b);}});
   for(const entry of headers['Set-Cookie']||[]){const [k,v]=entry.split(';')[0].split('=');jar[k]=v;}
   return{status,headers,...body};
  }};
 }
-async function fixture(t){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'study-local-test-'));await fs.writeFile(path.join(dir,'initial-accounts.json'),JSON.stringify({shortcutUsername:'quick-admin',accounts:[{id:'xjy900',name:'示例同学',role:'student',password:'StudentFixture2026!',mustChangePassword:false},{id:'admin',name:'本地管理员',role:'admin',password:'AdminFixture2026!',mustChangePassword:true},{id:'quick-admin',name:'快捷管理员',role:'admin',password:'QuickFixture2026!',mustChangePassword:false}]}));let app=await createLocalApp({directory:dir,origin:ORIGIN});t.after(async()=>{await app.close();await fs.rm(dir,{recursive:true,force:true});});return{dir,get app(){return app},async restart(){await app.close();app=await createLocalApp({directory:dir,origin:ORIGIN});return app;}};}
+async function fixture(t,options={}){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'study-local-test-'));await fs.writeFile(path.join(dir,'initial-accounts.json'),JSON.stringify({shortcutUsername:'quick-admin',accounts:[{id:'xjy900',name:'示例同学',role:'student',password:'StudentFixture2026!',mustChangePassword:false},{id:'admin',name:'本地管理员',role:'admin',password:'AdminFixture2026!',mustChangePassword:true},{id:'quick-admin',name:'快捷管理员',role:'admin',password:'QuickFixture2026!',mustChangePassword:false}]}));let app=await createLocalApp({directory:dir,origin:ORIGIN,...options});t.after(async()=>{await app.close();await fs.rm(dir,{recursive:true,force:true});});return{dir,get app(){return app},async restart(){await app.close();app=await createLocalApp({directory:dir,origin:ORIGIN,...options});return app;}};}
 test('local login uses real password checks, safe cookies and rejects foreign origins and retired routes',async t=>{
  const fx=await fixture(t),c=client(fx.app);
  assert.equal((await c.call('webPasswordLogin',{username:'xjy900',password:'wrong'})).ok,false);
@@ -87,4 +87,22 @@ test('local shortcut login still verifies the administrator password and keeps e
  assert.equal((await c.call('webPasswordLogin',{username:'xjy900',password:'QuickFixture2026!'})).ok,false);
  assert.equal((await c.call('webPasswordLogin',{username:'quick-admin',password:'QuickFixture2026!'})).ok,true);
  const disk=await fs.readFile(path.join(fx.dir,'records.json'),'utf8');assert.equal(disk.includes('"digest":"QuickFixture2026!"'),false);
+});
+
+test('HTTPS subpath deployment uses scoped secure cookies and rejects mismatched origins',async t=>{
+ const origin='https://school.example:1234';
+ const fx=await fixture(t,{origin,basePath:'/study/',mode:'server'}),c=client(fx.app,{},origin);
+ const login=await c.call('webPasswordLogin',{username:'',password:'QuickFixture2026!'});assert.equal(login.ok,true);
+ for(const value of login.headers['Set-Cookie']){assert.match(value,/Path=\/study\//);assert.match(value,/; Secure/);assert.match(value,/HttpOnly/)}
+ assert.equal((await c.call('feedbackList')).ok,true);
+ assert.equal((await c.call('me',{}, {origin:'https://school.example'})).status,403,'port belongs to the origin');
+ assert.equal((await c.call('me',{}, {host:'other.example'})).status,403);
+ let data;await fx.app.handle({method:'GET',url:'/api/study',headers:{host:new URL(origin).host}},{writeHead(){},end(b){data=JSON.parse(b)}});
+ assert.deepEqual(data,{ready:true,mode:'server',shortcutLogin:true});
+ const student=client(fx.app,{},origin);await student.call('webPasswordLogin',{username:'xjy900',password:'StudentFixture2026!'});
+ const photo=await student.call('uploadEvidence',{base64:Buffer.concat([Buffer.from([255,216,255]),Buffer.alloc(110)]).toString('base64')});
+ const evidence=fx.app.store.read('evidence',photo.data.id);
+ await fx.app.store.transaction(tx=>tx.put('reports','subpath-photo',{id:'subpath-photo',ownerId:'xjy900',photos:[evidence.fileID]}));
+ const urls=await student.call('evidenceUrls',{id:'subpath-photo'});assert.match(urls.data.urls[0],/^\/study\/api\/evidence\//);
+ let status;await fx.app.handle({method:'GET',url:urls.data.urls[0].replace(/^\/study/,''),headers:{host:new URL(origin).host}},{writeHead(s){status=s},end(){}});assert.equal(status,200);
 });

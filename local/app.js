@@ -8,8 +8,8 @@ const {createStudy}=require('../cloudfunctions/study/application');
 const {signature}=require('../cloudfunctions/study/web-gateway');
 const scrypt=promisify(crypto.scrypt);
 const allowed=new Set(['webPasswordLogin','me','logout','availability','book','bookings','cancel','reports','report','uploadEvidence','evidenceUrls','review','previewPenalty','users','audit','settings','createUser','role','ban','resetPassword','changePassword','submitFeedback','feedbackList']);
-const cookie=(name,value,maxAge)=>`${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
-async function createLocalApp({directory,origin}){
+async function createLocalApp({directory,origin,basePath='/',mode='local'}){
+  const cookie=(name,value,maxAge)=>`${name}=${value}; Path=${basePath}; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${origin.startsWith('https:')?'; Secure':''}`;
   const store=await createStore(directory),secret=crypto.randomBytes(32).toString('hex');
   const photoRoot=path.join(directory,'photos');await fs.mkdir(photoRoot,{recursive:true,mode:0o700});
   let initial;
@@ -26,7 +26,7 @@ async function createLocalApp({directory,origin}){
       ids.add(id);
       const salt=crypto.randomBytes(16).toString('hex');accounts.push({id,name,role,authSource:role==='student'?'school':'local',mustChangePassword:item.mustChangePassword??role!=='student',password:{salt,digest:(await scrypt(password,salt,32)).toString('hex')},sessionVersion:0,weeks:{},active:[],createdAt:Date.now()});
     }
-    await store.transaction(async tx=>{if(await tx.get('settings','localInitialized'))return;for(const user of accounts)if(!await tx.get('users',user.id))tx.put('users',user.id,user);if(!await tx.get('settings','main'))tx.put('settings','main',{id:'main',seatCount:10,openSlot:16,closeSlot:44,notice:'本地测试自习区：请选择具体座位和时间，预约记录保存在本机。'});tx.put('settings','localInitialized',{id:'localInitialized',createdAt:Date.now()});});
+    await store.transaction(async tx=>{if(await tx.get('settings','localInitialized'))return;for(const user of accounts)if(!await tx.get('users',user.id))tx.put('users',user.id,user);if(!await tx.get('settings','main'))tx.put('settings','main',{id:'main',seatCount:10,openSlot:16,closeSlot:44,notice:mode==='local'?'本地测试自习区：请选择具体座位和时间，预约记录保存在本机。':'请选择具体座位和时段，按时就座，共同维护安静、有序的自习环境。'});tx.put('settings','localInitialized',{id:'localInitialized',createdAt:Date.now()});});
   }
   try{await seed();}catch(e){await store.close();throw e;}
   const photoName=id=>{if(!/^local:\/\/[a-f0-9]{32}\.(jpg|png)$/.test(id))throw new Error('照片地址无效');return id.slice(8);};
@@ -34,7 +34,7 @@ async function createLocalApp({directory,origin}){
   const cloud={init(){},database:store.database,
     async uploadFile({cloudPath,fileContent}){const name=crypto.randomBytes(16).toString('hex')+(cloudPath.endsWith('.png')?'.png':'.jpg');await fs.writeFile(path.join(photoRoot,name),fileContent,{flag:'wx',mode:0o600});return{fileID:'local://'+name};},
     async deleteFile({fileList}){for(const id of fileList)await fs.unlink(path.join(photoRoot,photoName(id))).catch(e=>{if(e.code!=='ENOENT')throw e;});},
-    async getTempFileURL({fileList}){const expires=Date.now()+300000;return{fileList:await Promise.all(fileList.map(async id=>{const name=photoName(id);await fs.access(path.join(photoRoot,name));return{tempFileURL:'/api/evidence/'+name+'?expires='+expires+'&sig='+signPhoto(id,expires)};}))};}
+    async getTempFileURL({fileList}){const expires=Date.now()+300000;return{fileList:await Promise.all(fileList.map(async id=>{const name=photoName(id);await fs.access(path.join(photoRoot,name));return{tempFileURL:basePath+'api/evidence/'+name+'?expires='+expires+'&sig='+signPhoto(id,expires)};}))};}
   };
   const main=createStudy(cloud,{env:{WEB_GATEWAY_SECRET:secret,WEB_SITE_ORIGIN:origin}});
   function send(res,status,data,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(JSON.stringify(data));}
@@ -52,7 +52,7 @@ async function createLocalApp({directory,origin}){
         const bytes=await fs.readFile(path.join(photoRoot,name));res.writeHead(200,{'Content-Type':name.endsWith('.png')?'image/png':'image/jpeg','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});res.end(bytes);return true;
       }
       if(url.pathname!=='/api/study')return send(res,404,{ok:false,message:'接口不存在'}),true;
-      if(req.method==='GET')return send(res,200,{ready:true,mode:'local'}),true;
+      if(req.method==='GET')return send(res,200,{ready:true,mode,shortcutLogin:!!initial.shortcutUsername}),true;
       if(req.method!=='POST')return send(res,405,{ok:false,message:'请求方式无效'}),true;
       if(req.headers.origin!==origin)return send(res,403,{ok:false,message:'请求来源无效'}),true;
       const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>1100000)return send(res,413,{ok:false,message:'上传内容过大'}),true;chunks.push(chunk);}
