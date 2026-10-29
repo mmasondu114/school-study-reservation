@@ -208,6 +208,68 @@ async function execute(tx, actorId, action, input, now, dependencies = {}) {
       if (existing) { assert(existing.targetId === target.id && existing.actorId === user.id, '操作标识冲突'); return existing.penalty; }
       return punish(tx, target, now, reason, id, user.id);
     }
+    case 'submitAppeal': {
+      student(user);
+      assert(user.penalty && user.penalty.level >= 0, '当前账号没有违规处罚记录，无需申诉');
+      const reason = text(input.reason, 5, 500, '申诉说明');
+      const existingKey = await tx.get('appealKeys', user.id);
+      assert(!existingKey || !existingKey.pending, '你已有一项申诉正在审核中，请耐心等待');
+      const photos = [];
+      if (Array.isArray(input.photos) && input.photos.length > 0) {
+        assert(input.photos.length <= 3, '最多上传3张证明材料');
+        for (const pid of new Set(input.photos)) {
+          const evidence = await tx.get('evidence', pid);
+          assert(evidence && evidence.ownerId === user.id && evidence.fileID && !evidence.reportId && !evidence.appealId, '照片无效或已使用，请重新上传');
+          photos.push(evidence);
+        }
+      }
+      const id = newId();
+      const appeal = {
+        id,
+        ownerId: user.id,
+        ownerName: user.name,
+        penalty: { ...user.penalty },
+        reason,
+        photos: photos.map(p => p.fileID),
+        status: 'pending',
+        createdAt: now
+      };
+      for (const evidence of photos) {
+        evidence.appealId = id;
+        tx.put('evidence', evidence.id, evidence);
+      }
+      tx.put('appeals', id, appeal);
+      tx.put('appealKeys', user.id, { id: user.id, pending: true, appealId: id, createdAt: now });
+      return { id };
+    }
+    case 'reviewAppeal': {
+      staff(user);
+      const appeal = await tx.get('appeals', input.id);
+      assert(appeal && appeal.status === 'pending', '申诉记录不存在或已处理');
+      assert(appeal.ownerId !== user.id, '不能审核自己的申诉');
+      assert(['approve', 'reject'].includes(input.decision), '审核结果无效');
+      const note = text(input.note, 5, 300, '审核意见');
+      if (input.decision === 'approve') {
+        const target = await tx.get('users', appeal.ownerId);
+        if (target) {
+          d.revokePenalty(target, appeal.penalty, now);
+          tx.put('users', target.id, target);
+        }
+        appeal.status = 'approved';
+        const auditId = newId();
+        tx.put('audit', auditId, { id: auditId, actorId, targetId: appeal.ownerId, action: 'appeal_approved', appealId: appeal.id, note, createdAt: now });
+      } else {
+        appeal.status = 'rejected';
+        const auditId = newId();
+        tx.put('audit', auditId, { id: auditId, actorId, targetId: appeal.ownerId, action: 'appeal_rejected', appealId: appeal.id, note, createdAt: now });
+      }
+      appeal.reviewedAt = now;
+      appeal.reviewerId = user.id;
+      appeal.reviewNote = note;
+      tx.put('appealKeys', appeal.ownerId, { id: appeal.ownerId, pending: false, appealId: appeal.id, resolvedAt: now });
+      tx.put('appeals', appeal.id, appeal);
+      return appeal;
+    }
     default: throw new Error('不支持的操作');
   }
 }

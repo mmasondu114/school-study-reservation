@@ -7,7 +7,7 @@ const {createStore}=require('./store');
 const {createStudy}=require('../cloudfunctions/study/application');
 const {signature}=require('../cloudfunctions/study/web-gateway');
 const scrypt=promisify(crypto.scrypt);
-const allowed=new Set(['webPasswordLogin','me','logout','availability','book','bookings','cancel','reports','report','uploadEvidence','evidenceUrls','review','previewPenalty','users','audit','settings','createUser','role','ban','resetPassword','changePassword','submitFeedback','feedbackList']);
+const allowed=new Set(['webPasswordLogin','me','logout','availability','book','bookings','cancel','reports','report','uploadEvidence','evidenceUrls','review','previewPenalty','users','audit','settings','createUser','role','ban','resetPassword','changePassword','submitFeedback','feedbackList','submitAppeal','appeals','reviewAppeal']);
 async function createLocalApp({directory,origin,basePath='/',mode='local'}){
   const cookie=(name,value,maxAge)=>`${name}=${value}; Path=${basePath}; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${origin.startsWith('https:')?'; Secure':''}`;
   const store=await createStore(directory),secret=crypto.randomBytes(32).toString('hex');

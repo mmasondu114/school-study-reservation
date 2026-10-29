@@ -138,3 +138,35 @@ test('local staff password changes revoke sessions; school passwords stay with s
   assert.equal(fx.get('users','reviewer').sessionVersion,2);
   assert.equal(fx.get('users','reviewer').mustChangePassword,false);
 });
+test('appeal workflow: penalty dispute can be submitted, reviewed and revoked', async () => {
+  const fx=fixture();
+  // 1. 没有被处罚时申诉被拒绝
+  await assert.rejects(fx.run('alice','submitAppeal',{reason:'我没有违规'}), /没有违规处罚记录/);
+  
+  // 2. 处罚 alice (0级，扣300分钟，封禁1天)
+  await fx.run('admin','ban',{username:'alice',reason:'现场核实喧哗',requestId:'e'.repeat(32)});
+  assert.equal(d.quota(fx.get('users','alice'),NOW).deducted,300);
+  assert.equal(fx.get('users','alice').penalty.level,0);
+
+  // 3. 提交申诉
+  const appealResult = await fx.run('alice','submitAppeal',{reason:'当时正在轻声答疑，且只持续1分钟，提供澄清情况说明'});
+  assert.ok(appealResult.id);
+  const appealRecord = fx.get('appeals', appealResult.id);
+  assert.equal(appealRecord.status, 'pending');
+
+  // 4. 重复提交 pending 申诉被拒绝
+  await assert.rejects(fx.run('alice','submitAppeal',{reason:'补充说明情况'}), /已有一项申诉正在审核中/);
+
+  // 5. 审核员审核申诉 - 确认通过
+  const reviewResult = await fx.run('reviewer','reviewAppeal',{id:appealResult.id, decision:'approve', note:'经核对现场监控，确实属于轻声简短交流，情况属实，予以撤销处罚'});
+  assert.equal(reviewResult.status, 'approved');
+
+  // 6. 验证处罚已撤销，配额扣除已退还，封禁已解除
+  const updatedAlice = fx.get('users','alice');
+  assert.equal(updatedAlice.penalty, null);
+  assert.equal(d.quota(updatedAlice, NOW).deducted, 0);
+
+  // 7. 解除封禁后可重新正常预约
+  const booking = await fx.run('alice','book',{date:'2026-10-21',start:20,end:24,seat:2});
+  assert.equal(booking.status, 'active');
+});
