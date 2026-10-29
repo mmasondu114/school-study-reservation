@@ -49,6 +49,7 @@
     ".sites-runtime",
     "outputs",
     "work",
-    "local-dist"
+    "local-dist",
+    "vite.config.ts"
   ]
 }

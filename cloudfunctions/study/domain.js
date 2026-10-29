@@ -61,6 +61,28 @@ function imposePenalty(user, now, reason, sourceId) {
   user.penalty = { level, imposedAt: now, until, reason, sourceId, warned: true };
   return { ...user.penalty, deducted: deductions[level], nextWeekDeducted: level === 2 ? 300 : 0 };
 }
+function revokePenalty(user, penalty, now) {
+  if (!penalty) return;
+  const level = penalty.level;
+  const deductions = [300, 360, 600, 0];
+  const deducted = penalty.deducted !== undefined ? penalty.deducted : deductions[level] || 0;
+  const nextDeducted = penalty.nextWeekDeducted !== undefined ? penalty.nextWeekDeducted : (level === 2 ? 300 : 0);
+  if (penalty.imposedAt) {
+    const wk = weekKey(penalty.imposedAt);
+    if (user.weeks && user.weeks[wk]) {
+      user.weeks[wk].deducted = Math.max(0, (user.weeks[wk].deducted || 0) - deducted);
+    }
+    if (nextDeducted > 0) {
+      const nwk = nextWeek(wk);
+      if (user.weeks && user.weeks[nwk]) {
+        user.weeks[nwk].deducted = Math.max(0, (user.weeks[nwk].deducted || 0) - nextDeducted);
+      }
+    }
+  }
+  if (user.penalty && (user.penalty.sourceId === penalty.sourceId || user.penalty.imposedAt === penalty.imposedAt)) {
+    user.penalty = null;
+  }
+}
 function publicUser(user, now) {
   return {
     id: user.id, name: user.name, role: user.role,
@@ -71,4 +93,4 @@ function publicUser(user, now) {
   };
 }
 function isSchoolAccount(user) { return !!user && (user.authSource === 'school' || user.role === 'student'); }
-module.exports = { HALF_HOUR, DAY, WEEKLY_MINUTES, assert, dateKey, dayStart, weekKey, nextWeek, interval, quota, ledger, penaltyState, imposePenalty, publicUser, isSchoolAccount };
+module.exports = { HALF_HOUR, DAY, WEEKLY_MINUTES, assert, dateKey, dayStart, weekKey, nextWeek, interval, quota, ledger, penaltyState, imposePenalty, revokePenalty, publicUser, isSchoolAccount };

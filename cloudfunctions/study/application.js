@@ -126,7 +126,7 @@ async function webPasswordLogin(input, client, now) {
 async function dispatch(event, client, now) {
   const { action, input = {}, token } = event;
   if (action === 'webPasswordLogin') return webPasswordLogin(input,client,now);
-  const allowed = new Set(['me','logout','availability','book','bookings','cancel','reports','report','uploadEvidence','evidenceUrls','review','previewPenalty','users','audit','settings','createUser','role','ban','resetPassword','changePassword','submitFeedback','feedbackList']);
+  const allowed = new Set(['me','logout','availability','book','bookings','cancel','reports','report','uploadEvidence','evidenceUrls','review','previewPenalty','users','audit','settings','createUser','role','ban','resetPassword','changePassword','submitFeedback','feedbackList','submitAppeal','appeals','reviewAppeal']);
   d.assert(allowed.has(action), '该入口已停用，请使用网站账号密码登录');
   const user = await authenticate(token, client, now);
   if (action === 'logout') {
@@ -159,10 +159,16 @@ async function dispatch(event, client, now) {
     if (input.pending && user.role !== 'student') filter.status = 'pending';
     return { items: (await list('reports', filter, input.offset || 0)).map(r => cleanReport(r, user)) };
   }
+  if (action === 'appeals') {
+    const filter = user.role === 'student' ? { ownerId: user.id } : {};
+    if (input.pending && user.role !== 'student') filter.status = 'pending';
+    return { items: await list('appeals', filter, input.offset || 0) };
+  }
   if (action === 'evidenceUrls') {
-    const report = await read('reports', input.id);
+    let report = await read('reports', input.id);
+    if (!report) report = await read('appeals', input.id);
     d.assert(report && (['admin', 'reviewer'].includes(user.role) || report.ownerId === user.id), '无权查看照片');
-    const result = await cloud.getTempFileURL({ fileList: report.photos });
+    const result = await cloud.getTempFileURL({ fileList: report.photos || [] });
     d.assert(result.fileList.every(f => f.tempFileURL), '照片暂时无法读取，请重试');
     return { urls: result.fileList.map(f => f.tempFileURL) };
   }
